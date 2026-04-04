@@ -30,6 +30,24 @@ Kết hợp nhiều nguồn dữ liệu miễn phí để dự đoán lượng k
 
 ![Dashboard](docs/images/dashboard.png)
 
+## 🏆 Benchmark: TimesFM 2.5 vs Truyền thống
+
+Walk-forward backtest, 3 splits, horizon = 6 tháng:
+
+![Benchmark](docs/images/benchmark_visitors.png)
+
+| Rank | Model | MAE | MAPE | Dir Acc | Ghi chú |
+|---|---|---|---|---|---|
+| 🥇 | **Holt-Winters** | 113.35 | 12.05% | 80% | Best cho monthly seasonal data |
+| 🥈 | **Seasonal Naive** | 116.67 | 11.60% | 80% | Đơn giản, hiệu quả |
+| 🥉 | Moving Average | 141.67 | 13.38% | 20% | |
+| 4 | **TimesFM 2.5** | 162.11 | 14.53% | **80%** | Zero-shot, không cần config |
+| 5 | Auto-ARIMA | 188.83 | 16.99% | 40% | Chậm nhất (905ms) |
+| 6 | Naive | 225.00 | 20.14% | 20% | Baseline |
+| 7 | Prophet | 359.43 | 37.64% | 40% | Quá ít data points |
+
+**Nhận xét:** Holt-Winters thắng trên monthly data (seasonal rõ, ít điểm). TimesFM 2.5 xếp 4 nhưng **Directional Accuracy ngang top** (80%) và hoàn toàn zero-shot — không cần tuning. TimesFM sẽ mạnh hơn trên daily/weekly data (nhiều điểm hơn).
+
 ## 🎯 Tính năng
 
 - **Google Trends Forecast** — Dự báo 11 search queries (VN + EN) liên quan đến du lịch Đà Nẵng
