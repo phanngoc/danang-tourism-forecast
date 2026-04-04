@@ -7,7 +7,8 @@ dist/
 build/
 .cache/
 data/cache/
-output/*.png
-output/*.csv
+output/
+data/cache/
 *.DS_Store
 .env
+.ipynb_checkpoints/
