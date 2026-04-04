@@ -1,0 +1,9 @@
+timesfm>=2.0
+torch>=2.0
+pytrends>=4.9
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+seaborn>=0.12
+requests
+scikit-learn>=1.3
