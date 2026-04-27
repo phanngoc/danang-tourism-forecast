@@ -1,14 +1,13 @@
 """
-Thu thập dữ liệu cho dự báo du lịch Đà Nẵng.
+Thu thap du lieu cho du bao du lich Viet Nam.
 
-Nguồn:
+Nguon:
 1. Google Trends — search interest daily/weekly
-2. Open-Meteo — thời tiết Đà Nẵng
-3. Thống kê lượng khách hàng tháng (manual + crawl)
-4. Event calendar
+2. Open-Meteo — thoi tiet (any city via lat/lon)
+3. Thong ke luong khach hang thang (from CityConfig)
+4. Event calendar (from CityConfig)
 """
 
-import json
 import logging
 import time
 from datetime import datetime, timedelta
@@ -19,29 +18,12 @@ import numpy as np
 import pandas as pd
 import requests
 
+from .city_config import CityConfig
+
 logger = logging.getLogger(__name__)
 
+
 # ═══ GOOGLE TRENDS ═══
-
-# Các query du lịch Đà Nẵng — leading indicators
-TOURISM_QUERIES = {
-    "da_nang_hotel": "khách sạn đà nẵng",
-    "da_nang_travel": "du lịch đà nẵng",
-    "da_nang_flight": "vé máy bay đà nẵng",
-    "ba_na_hills": "bà nà hills",
-    "my_khe_beach": "biển mỹ khê",
-    "da_nang_hotel_en": "da nang hotel",
-    "da_nang_travel_en": "da nang travel",
-}
-
-# Queries quốc tế — khách quốc tế search trước khi đến
-INTL_QUERIES = {
-    "danang_en": "danang",
-    "danang_hotel_en": "danang hotel",
-    "danang_flight_en": "flight to danang",
-    "vietnam_beach": "vietnam beach",
-}
-
 
 def fetch_google_trends(
     queries: dict[str, str],
@@ -50,16 +32,16 @@ def fetch_google_trends(
     sleep_sec: float = 2.0,
 ) -> pd.DataFrame:
     """
-    Lấy Google Trends data cho nhiều queries.
+    Lay Google Trends data cho nhieu queries.
 
     Args:
         queries: Dict {key: search_term}
-        timeframe: Khoảng thời gian (VD: 'today 3-y', '2023-01-01 2026-04-01')
-        geo: Quốc gia ('' = worldwide, 'VN' = Việt Nam)
-        sleep_sec: Delay giữa các request (tránh rate limit)
+        timeframe: Khoang thoi gian (VD: 'today 3-y', '2023-01-01 2026-04-01')
+        geo: Quoc gia ('' = worldwide, 'VN' = Viet Nam)
+        sleep_sec: Delay giua cac request (tranh rate limit)
 
     Returns:
-        DataFrame với columns = query keys, index = date
+        DataFrame voi columns = query keys, index = date
     """
     from pytrends.request import TrendReq
 
@@ -81,11 +63,11 @@ def fetch_google_trends(
             time.sleep(5)
 
     if not all_data:
-        raise ValueError("Không lấy được data Google Trends nào")
+        raise ValueError("Khong lay duoc data Google Trends nao")
 
     result = pd.DataFrame(all_data)
     result.index.name = "date"
-    logger.info(f"✅ Google Trends: {len(result)} rows, {len(result.columns)} queries")
+    logger.info(f"Google Trends: {len(result)} rows, {len(result.columns)} queries")
     return result
 
 
@@ -96,10 +78,10 @@ def fetch_trends_daily(
     geo: str = "VN",
 ) -> pd.DataFrame:
     """
-    Lấy Google Trends daily data (chia nhỏ thành chunks 6 tháng).
+    Lay Google Trends daily data (chia nho thanh chunks 6 thang).
 
-    Google Trends chỉ trả daily khi timeframe < 9 tháng.
-    Hàm này tự chia nhỏ rồi nối lại.
+    Google Trends chi tra daily khi timeframe < 9 thang.
+    Ham nay tu chia nho roi noi lai.
     """
     from pytrends.request import TrendReq
 
@@ -127,35 +109,29 @@ def fetch_trends_daily(
         current = chunk_end + timedelta(days=1)
 
     if not chunks:
-        raise ValueError(f"Không lấy được daily data cho '{query}'")
+        raise ValueError(f"Khong lay duoc daily data cho '{query}'")
 
     result = pd.concat(chunks)
     result = result[~result.index.duplicated(keep="last")]
     result = result.sort_index()
     result.columns = [query.replace(" ", "_")]
-    logger.info(f"✅ Daily trends '{query}': {len(result)} days")
+    logger.info(f"Daily trends '{query}': {len(result)} days")
     return result
 
 
-# ═══ THỜI TIẾT ĐÀ NẴNG ═══
-
-# Tọa độ Đà Nẵng
-DANANG_LAT = 16.0544
-DANANG_LON = 108.2022
-
+# ═══ THOI TIET (ANY CITY) ═══
 
 def fetch_weather(
     start_date: str = "2023-01-01",
     end_date: str = "",
-    lat: float = DANANG_LAT,
-    lon: float = DANANG_LON,
+    lat: float = 16.0544,
+    lon: float = 108.2022,
 ) -> pd.DataFrame:
     """
-    Lấy thời tiết Đà Nẵng từ Open-Meteo API (miễn phí).
+    Lay thoi tiet tu Open-Meteo API (mien phi).
 
     Returns:
-        DataFrame daily: temperature_max, temperature_min, precipitation,
-                        rain, sunshine_duration
+        DataFrame daily: temp_max, temp_min, precipitation, rain, sunshine_hours
     """
     if not end_date:
         end_date = datetime.now().strftime("%Y-%m-%d")
@@ -178,111 +154,52 @@ def fetch_weather(
     df["date"] = pd.to_datetime(df["time"])
     df = df.set_index("date").drop(columns=["time"])
     df.columns = ["temp_max", "temp_min", "precipitation", "rain", "sunshine_hours"]
-    # sunshine_duration từ API là seconds → convert hours
+    # sunshine_duration from API is seconds -> convert hours
     df["sunshine_hours"] = df["sunshine_hours"] / 3600
 
-    logger.info(f"✅ Weather: {len(df)} days ({start_date} → {end_date})")
+    logger.info(f"Weather: {len(df)} days ({start_date} -> {end_date})")
     return df
 
 
-# ═══ SỐ LIỆU KHÁCH DU LỊCH (MANUAL) ═══
+# ═══ SO LIEU KHACH DU LICH (FROM CITY CONFIG) ═══
 
-# Data tổng hợp từ Cục Thống kê Đà Nẵng qua báo chí
-# Đơn vị: nghìn lượt
-MONTHLY_VISITORS = {
-    # 2023 (ước tính từ tổng năm 7.39M)
-    "2023-01": {"total": 550, "international": 150, "domestic": 400},
-    "2023-02": {"total": 620, "international": 170, "domestic": 450},
-    "2023-03": {"total": 580, "international": 180, "domestic": 400},
-    "2023-04": {"total": 650, "international": 200, "domestic": 450},
-    "2023-05": {"total": 680, "international": 220, "domestic": 460},
-    "2023-06": {"total": 750, "international": 250, "domestic": 500},
-    "2023-07": {"total": 800, "international": 280, "domestic": 520},
-    "2023-08": {"total": 720, "international": 260, "domestic": 460},
-    "2023-09": {"total": 550, "international": 200, "domestic": 350},
-    "2023-10": {"total": 500, "international": 180, "domestic": 320},
-    "2023-11": {"total": 480, "international": 170, "domestic": 310},
-    "2023-12": {"total": 510, "international": 190, "domestic": 320},
-    # 2024 (có số liệu chính thức)
-    "2024-01": {"total": 700, "international": 250, "domestic": 450},
-    "2024-02": {"total": 750, "international": 260, "domestic": 490},
-    "2024-03": {"total": 850, "international": 300, "domestic": 550},
-    "2024-04": {"total": 1000, "international": 350, "domestic": 650},
-    "2024-05": {"total": 1050, "international": 370, "domestic": 680},
-    "2024-06": {"total": 1100, "international": 380, "domestic": 720},
-    "2024-07": {"total": 1300, "international": 427, "domestic": 906},
-    "2024-08": {"total": 1200, "international": 420, "domestic": 780},
-    "2024-09": {"total": 900, "international": 350, "domestic": 550},
-    "2024-10": {"total": 800, "international": 320, "domestic": 480},
-    "2024-11": {"total": 750, "international": 300, "domestic": 450},
-    "2024-12": {"total": 800, "international": 330, "domestic": 470},
-    # 2025 (từ báo cáo 8 tháng = 12.8M, 5M intl, 7.8M domestic)
-    "2025-01": {"total": 800, "international": 350, "domestic": 450},
-    "2025-02": {"total": 900, "international": 380, "domestic": 520},
-    "2025-03": {"total": 950, "international": 420, "domestic": 530},
-    "2025-04": {"total": 1100, "international": 450, "domestic": 650},
-    "2025-05": {"total": 1200, "international": 480, "domestic": 720},
-    "2025-06": {"total": 1200, "international": 500, "domestic": 700},
-    "2025-07": {"total": 1800, "international": 600, "domestic": 1200},
-    "2025-08": {"total": 1970, "international": 671, "domestic": 1300},
-}
+def get_visitor_data(city: CityConfig) -> pd.DataFrame:
+    """
+    Tra ve DataFrame so lieu khach hang thang from city config.
 
-# Doanh thu lưu trú + ăn uống (tỷ VND)
-MONTHLY_REVENUE = {
-    "2024-Q1": 7400,
-    "2024-Q2": 8300,
-    "2024-7m": 15700,
-    "2025-Q1": 7423,
-    "2025-Q2": 8914,
-    "2025-6m": 16337,
-}
-
-
-def get_visitor_data() -> pd.DataFrame:
-    """Trả về DataFrame số liệu khách hàng tháng."""
+    Includes extended metrics when available:
+      - revenue_billion_vnd, occupancy_pct, flights, avg_stay_days
+    """
     records = []
-    for month, data in MONTHLY_VISITORS.items():
-        records.append({
+    for month, data in city.monthly_visitors.items():
+        row = {
             "date": pd.Timestamp(month + "-01"),
             "total_visitors_k": data["total"],
             "intl_visitors_k": data["international"],
             "domestic_visitors_k": data["domestic"],
-        })
+        }
+        metrics = city.monthly_metrics.get(month, {})
+        row["revenue_billion_vnd"] = metrics.get("revenue_billion_vnd")
+        row["occupancy_pct"] = metrics.get("occupancy_pct")
+        row["flights"] = metrics.get("flights")
+        row["avg_stay_days"] = metrics.get("avg_stay_days")
+        records.append(row)
     df = pd.DataFrame(records).set_index("date").sort_index()
     return df
 
 
 # ═══ EVENT CALENDAR ═══
 
-DANANG_EVENTS = [
-    # 2024
-    {"date": "2024-01-25", "name": "Tết Nguyên Đán 2024", "impact": 3, "duration_days": 9},
-    {"date": "2024-04-30", "name": "Lễ 30/4 - 1/5", "impact": 2, "duration_days": 5},
-    {"date": "2024-06-08", "name": "DIFF Pháo hoa 2024", "impact": 3, "duration_days": 35},
-    {"date": "2024-07-17", "name": "Enjoy Danang 2024", "impact": 2, "duration_days": 5},
-    {"date": "2024-09-02", "name": "Quốc khánh 2/9", "impact": 2, "duration_days": 4},
-    # 2025
-    {"date": "2025-01-29", "name": "Tết Nguyên Đán 2025", "impact": 3, "duration_days": 9},
-    {"date": "2025-04-30", "name": "Lễ 30/4 - 1/5", "impact": 2, "duration_days": 5},
-    {"date": "2025-06-01", "name": "DIFF Pháo hoa 2025", "impact": 3, "duration_days": 35},
-    {"date": "2025-07-15", "name": "Enjoy Danang 2025", "impact": 2, "duration_days": 5},
-    {"date": "2025-09-02", "name": "Quốc khánh 2/9", "impact": 2, "duration_days": 4},
-    {"date": "2025-10-15", "name": "Ngày hội Du lịch ĐN", "impact": 2, "duration_days": 4},
-    # 2026
-    {"date": "2026-02-17", "name": "Tết Nguyên Đán 2026", "impact": 3, "duration_days": 9},
-    {"date": "2026-04-30", "name": "Lễ 30/4 - 1/5", "impact": 2, "duration_days": 5},
-]
-
-
 def get_event_series(
+    city: CityConfig,
     start_date: str = "2023-01-01",
     end_date: str = "",
 ) -> pd.DataFrame:
     """
-    Tạo daily event impact series.
+    Tao daily event impact series from city config.
 
     Returns:
-        DataFrame daily với cột 'event_impact' (0-3) và 'has_event' (0/1)
+        DataFrame daily voi cot 'event_impact' (0-3) va 'has_event' (0/1)
     """
     if not end_date:
         end_date = datetime.now().strftime("%Y-%m-%d")
@@ -291,7 +208,7 @@ def get_event_series(
     df = pd.DataFrame({"date": dates, "event_impact": 0, "has_event": 0})
     df = df.set_index("date")
 
-    for event in DANANG_EVENTS:
+    for event in city.events:
         evt_start = pd.Timestamp(event["date"])
         evt_end = evt_start + pd.Timedelta(days=event["duration_days"])
         mask = (df.index >= evt_start) & (df.index <= evt_end)
@@ -304,62 +221,70 @@ def get_event_series(
 # ═══ COMBINED DATASET ═══
 
 def collect_all(
+    city: CityConfig,
     start_date: str = "2023-01-01",
     end_date: str = "",
     fetch_trends: bool = True,
-    cache_dir: str = "data/cache",
+    cache_dir: str = "",
 ) -> dict[str, pd.DataFrame]:
     """
-    Thu thập tất cả data sources.
+    Thu thap tat ca data sources for a given city.
 
     Returns:
-        Dict với keys: trends_weekly, trends_daily, weather, visitors, events
+        Dict voi keys: trends_weekly, trends_daily, weather, visitors, events
     """
     if not end_date:
         end_date = datetime.now().strftime("%Y-%m-%d")
 
+    if not cache_dir:
+        cache_dir = f"data/cache/{city.city_id}"
     cache = Path(cache_dir)
     cache.mkdir(parents=True, exist_ok=True)
 
     result = {}
 
-    # 1. Weather
-    logger.info("📡 Fetching weather...")
+    # 1. Weather (using city coordinates)
+    logger.info(f"Fetching weather for {city.city_name}...")
     try:
-        result["weather"] = fetch_weather(start_date, end_date)
+        result["weather"] = fetch_weather(
+            start_date, end_date,
+            lat=city.latitude, lon=city.longitude,
+        )
         result["weather"].to_csv(cache / "weather.csv")
     except Exception as e:
         logger.error(f"Weather failed: {e}")
 
     # 2. Google Trends
     if fetch_trends:
-        logger.info("📡 Fetching Google Trends (weekly)...")
+        logger.info(f"Fetching Google Trends (weekly) for {city.city_name}...")
         try:
-            all_queries = {**TOURISM_QUERIES, **INTL_QUERIES}
             tf = f"{start_date} {end_date}"
             result["trends_weekly"] = fetch_google_trends(
-                all_queries, timeframe=tf, geo=""
+                city.all_queries, timeframe=tf, geo=""
             )
             result["trends_weekly"].to_csv(cache / "trends_weekly.csv")
         except Exception as e:
             logger.error(f"Trends weekly failed: {e}")
 
-        logger.info("📡 Fetching Google Trends (daily, VN)...")
-        try:
-            result["trends_daily"] = fetch_trends_daily(
-                "khách sạn đà nẵng", start_date, end_date, geo="VN"
-            )
-            result["trends_daily"].to_csv(cache / "trends_daily.csv")
-        except Exception as e:
-            logger.error(f"Trends daily failed: {e}")
+        # Daily trends — use first tourism query as representative
+        if city.tourism_queries:
+            first_query = next(iter(city.tourism_queries.values()))
+            logger.info(f"Fetching Google Trends (daily, VN): '{first_query}'...")
+            try:
+                result["trends_daily"] = fetch_trends_daily(
+                    first_query, start_date, end_date, geo="VN"
+                )
+                result["trends_daily"].to_csv(cache / "trends_daily.csv")
+            except Exception as e:
+                logger.error(f"Trends daily failed: {e}")
 
-    # 3. Visitors (manual data)
-    result["visitors"] = get_visitor_data()
+    # 3. Visitors (from city config)
+    result["visitors"] = get_visitor_data(city)
     result["visitors"].to_csv(cache / "visitors.csv")
 
     # 4. Events
-    result["events"] = get_event_series(start_date, end_date)
+    result["events"] = get_event_series(city, start_date, end_date)
     result["events"].to_csv(cache / "events.csv")
 
-    logger.info(f"✅ Collected {len(result)} datasets")
+    logger.info(f"Collected {len(result)} datasets for {city.city_name}")
     return result

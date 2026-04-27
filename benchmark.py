@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Benchmark: So sánh TimesFM 2.5 vs các model truyền thống.
+Benchmark: So sanh TimesFM 2.5 vs cac model truyen thong.
+Supports any Vietnamese city via --city flag.
 
 Models:
   1. Naive (Last Value)
@@ -12,9 +13,10 @@ Models:
   7. TimesFM 2.5 (Google Research)
 
 Usage:
-    python benchmark.py
-    python benchmark.py --series visitors   # Chỉ benchmark visitors
-    python benchmark.py --series trends     # Chỉ benchmark Google Trends
+    python benchmark.py                        # Da Nang (default)
+    python benchmark.py --city hue             # Hue
+    python benchmark.py --city hue --series visitors
+    python benchmark.py --city danang --series trends
 """
 
 import argparse
@@ -30,7 +32,8 @@ import seaborn as sns
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.data_collector import collect_all, get_visitor_data, TOURISM_QUERIES
+from src.city_config import load_all_cities, get_city, list_cities
+from src.data_collector import collect_all, get_visitor_data
 from src.forecaster import TourismForecaster
 from src.baselines import run_all_baselines, evaluate_all, BaselineForecast
 
@@ -51,8 +54,8 @@ def benchmark_walk_forward(
     forecaster: TourismForecaster = None,
 ) -> pd.DataFrame:
     """
-    Walk-forward benchmark cho tất cả models.
-    Chia data thành n_splits, mỗi split forecast horizon bước rồi so sánh.
+    Walk-forward benchmark cho tat ca models.
+    Chia data thanh n_splits, moi split forecast horizon buoc roi so sanh.
     """
     if step is None:
         step = horizon
@@ -91,7 +94,7 @@ def benchmark_walk_forward(
                 horizon=h,
                 train_time_ms=tfm_time,
             ))
-            logger.info(f"  ✅ TimesFM 2.5")
+            logger.info(f"  TimesFM 2.5 done")
 
         # Evaluate
         metrics = evaluate_all(train, baselines, actual)
@@ -119,7 +122,7 @@ def plot_benchmark(
     title: str = "Benchmark",
     save_path: str = None,
 ) -> plt.Figure:
-    """Vẽ benchmark comparison chart."""
+    """Ve benchmark comparison chart."""
     fig, axes = plt.subplots(1, 4, figsize=(20, 6))
 
     metrics = ["MAE", "RMSE", "MAPE (%)", "Dir Acc (%)"]
@@ -173,7 +176,7 @@ def plot_forecast_comparison(
     title: str = "",
     save_path: str = None,
 ) -> plt.Figure:
-    """Vẽ so sánh forecast của các models."""
+    """Ve so sanh forecast cua cac models."""
     fig, ax = plt.subplots(figsize=(15, 7))
 
     # Context (last 20 points)
@@ -211,20 +214,29 @@ def plot_forecast_comparison(
 
 
 def main():
+    load_all_cities()
+
     parser = argparse.ArgumentParser()
+    parser.add_argument("--city", default="danang",
+                        help=f"City ID (available: {', '.join(list_cities())})")
     parser.add_argument("--series", default="all", choices=["all", "visitors", "trends"])
     parser.add_argument("--horizon", type=int, default=6)
     parser.add_argument("--splits", type=int, default=3)
     args = parser.parse_args()
 
-    out = Path("output/benchmark")
+    city = get_city(args.city)
+    out = Path(f"output/benchmark/{city.city_id}")
     out.mkdir(parents=True, exist_ok=True)
 
     # Collect data
     logger.info("=" * 60)
-    logger.info("COLLECTING DATA")
+    logger.info(f"COLLECTING DATA — {city.city_name}")
     logger.info("=" * 60)
-    data = collect_all(start_date="2023-01-01", fetch_trends=(args.series in ["all", "trends"]))
+    data = collect_all(
+        city=city,
+        start_date="2023-01-01",
+        fetch_trends=(args.series in ["all", "trends"]),
+    )
 
     # Load TimesFM
     logger.info("\nLOADING TimesFM 2.5...")
@@ -233,10 +245,10 @@ def main():
 
     all_benchmarks = {}
 
-    # ═══ BENCHMARK VISITORS ═══
+    # BENCHMARK VISITORS
     if args.series in ["all", "visitors"]:
         logger.info("\n" + "=" * 60)
-        logger.info("BENCHMARK: Luong khach hang thang")
+        logger.info(f"BENCHMARK: Luong khach — {city.city_name}")
         logger.info("=" * 60)
 
         visitors = data["visitors"]
@@ -253,25 +265,25 @@ def main():
         )
 
         print("\n" + "=" * 60)
-        print("VISITORS BENCHMARK RESULTS")
+        print(f"VISITORS BENCHMARK RESULTS — {city.city_name}")
         print("=" * 60)
         print(avg.to_string())
 
-        plot_benchmark(avg, "Luong khach Du lich Da Nang (monthly)",
+        plot_benchmark(avg, f"Luong khach Du lich {city.city_name} (monthly)",
                       save_path=str(out / "benchmark_visitors.png"))
 
         avg.to_csv(out / "benchmark_visitors.csv")
         all_benchmarks["visitors"] = avg
 
-    # ═══ BENCHMARK TRENDS ═══
+    # BENCHMARK TRENDS
     if args.series in ["all", "trends"] and "trends_weekly" in data:
         logger.info("\n" + "=" * 60)
-        logger.info("BENCHMARK: Google Trends (weekly)")
+        logger.info(f"BENCHMARK: Google Trends (weekly) — {city.city_name}")
         logger.info("=" * 60)
 
         trends = data["trends_weekly"]
-        # Chọn 3 queries tiêu biểu
-        test_queries = ["da_nang_hotel", "ba_na_hills", "danang_hotel_en"]
+        # Pick first 3 tourism queries
+        test_queries = list(city.tourism_queries.keys())[:3]
         test_queries = [q for q in test_queries if q in trends.columns]
 
         for query in test_queries:
@@ -292,22 +304,21 @@ def main():
             )
 
             print(f"\n{'=' * 60}")
-            print(f"TRENDS BENCHMARK: {query}")
+            print(f"TRENDS BENCHMARK: {query} — {city.city_name}")
             print("=" * 60)
             print(avg.to_string())
 
-            plot_benchmark(avg, f"Google Trends: {query}",
+            plot_benchmark(avg, f"Google Trends: {query} ({city.city_name})",
                           save_path=str(out / f"benchmark_{query}.png"))
             avg.to_csv(out / f"benchmark_{query}.csv")
             all_benchmarks[query] = avg
 
-    # ═══ FINAL SUMMARY ═══
+    # FINAL SUMMARY
     print("\n" + "=" * 60)
-    print("FINAL SUMMARY")
+    print(f"FINAL SUMMARY — {city.city_name}")
     print("=" * 60)
     for name, metrics in all_benchmarks.items():
         print(f"\n--- {name} ---")
-        # Rank TimesFM
         if "TimesFM 2.5" in metrics.index:
             rank = list(metrics.index).index("TimesFM 2.5") + 1
             total = len(metrics)
@@ -317,7 +328,7 @@ def main():
             print(f"  TimesFM 2.5: Rank {rank}/{total} (MAE={tfm_mae})")
             print(f"  Best model:  {best_model} (MAE={best_mae})")
             if rank == 1:
-                print(f"  🏆 TimesFM 2.5 WINS!")
+                print(f"  TimesFM 2.5 WINS!")
             else:
                 gap = (tfm_mae - best_mae) / best_mae * 100
                 print(f"  Gap: {gap:+.1f}% vs best")

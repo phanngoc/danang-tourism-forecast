@@ -67,27 +67,27 @@ class TourismForecaster:
         self.model = None
 
     def load_model(self):
-        """Load TimesFM 2.5 từ HuggingFace."""
+        """Load TimesFM 2.0 (500M) tu HuggingFace."""
         import timesfm
 
-        logger.info("🔄 Loading TimesFM 2.5...")
+        logger.info("Loading TimesFM 2.0 (500M)...")
         torch.set_float32_matmul_precision("high")
 
-        self.model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
-            "google/timesfm-2.5-200m-pytorch"
+        # TimesFM 2.0 — 50 transformer layers, 500M params, context 2048
+        self.model = timesfm.TimesFm(
+            hparams=timesfm.TimesFmHparams(
+                backend="cpu",
+                per_core_batch_size=32,
+                horizon_len=self.max_horizon,
+                context_len=min(self.max_context, 2048),
+                num_layers=50,
+                use_positional_embedding=False,
+            ),
+            checkpoint=timesfm.TimesFmCheckpoint(
+                huggingface_repo_id="google/timesfm-2.0-500m-pytorch",
+            ),
         )
-        self.model.compile(
-            timesfm.ForecastConfig(
-                max_context=self.max_context,
-                max_horizon=self.max_horizon,
-                normalize_inputs=True,
-                use_continuous_quantile_head=True,
-                force_flip_invariance=True,
-                infer_is_positive=True,
-                fix_quantile_crossing=True,
-            )
-        )
-        logger.info("✅ Model loaded")
+        logger.info("Model loaded")
 
     def _ensure_loaded(self):
         if self.model is None:
@@ -127,12 +127,20 @@ class TourismForecaster:
         series = self._clean_series(series)
         h = min(horizon, self.max_horizon)
 
-        point, quantile = self.model.forecast(horizon=h, inputs=[series])
+        # TimesFM 2.0 API: forecast(inputs, freq) -> (mean, full)
+        # full shape: (n_inputs, horizon, 1 + num_quantiles=10)
+        # Skip the mean column (idx 0); keep 9 quantiles
+        point, full = self.model.forecast(inputs=[series], freq=[1])
+
+        # Pad quantile to 10 cols (model returns 9: q0.1..q0.9). Add q0.5 at front for compat.
+        quantile = full[0, :h, 1:]  # shape (h, 9)
+        # Insert duplicate of q0.1 at index 0 to match original 10-col layout
+        quantile = np.concatenate([quantile[:, :1], quantile], axis=1)
 
         return ForecastResult(
             name=name,
             point_forecast=point[0, :h],
-            quantile_forecast=quantile[0, :h, :],
+            quantile_forecast=quantile,
             horizon=h,
             context_length=len(series),
             last_value=float(series[-1]),
@@ -159,14 +167,17 @@ class TourismForecaster:
         names = list(series_dict.keys())
         inputs = [self._clean_series(series_dict[n]) for n in names]
 
-        points, quantiles = self.model.forecast(horizon=h, inputs=inputs)
+        # TimesFM 2.0 API
+        points, full = self.model.forecast(inputs=inputs, freq=[1] * len(inputs))
 
         results = {}
         for i, name in enumerate(names):
+            q = full[i, :h, 1:]  # drop mean column, 9 quantile cols
+            q = np.concatenate([q[:, :1], q], axis=1)  # pad to 10 cols
             results[name] = ForecastResult(
                 name=name,
                 point_forecast=points[i, :h],
-                quantile_forecast=quantiles[i, :h, :],
+                quantile_forecast=q,
                 horizon=h,
                 context_length=len(inputs[i]),
                 last_value=float(inputs[i][-1]),
