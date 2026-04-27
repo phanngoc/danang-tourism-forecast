@@ -1,5 +1,6 @@
 """
-End-to-end pipeline: collect → forecast → visualize → report.
+End-to-end pipeline: collect -> forecast -> visualize -> report.
+Generic for any Vietnamese city via CityConfig.
 """
 
 import logging
@@ -10,10 +11,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from .data_collector import (
-    collect_all, get_visitor_data, get_event_series,
-    TOURISM_QUERIES, INTL_QUERIES,
-)
+from .city_config import CityConfig, get_city, load_all_cities
+from .data_collector import collect_all, get_visitor_data, get_event_series
 from .forecaster import TourismForecaster, ForecastResult
 from .visualizer import (
     plot_trends_forecast,
@@ -26,16 +25,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PipelineResult:
-    """Tất cả kết quả pipeline."""
+    """Tat ca ket qua pipeline."""
+    city: CityConfig
     trends_forecasts: dict[str, ForecastResult]
     visitor_forecast: Optional[ForecastResult]
     data: dict[str, pd.DataFrame]
     output_dir: str = "output"
 
     def summary_text(self) -> str:
-        """Tạo text summary cho Telegram/bot."""
+        """Tao text summary cho Telegram/bot."""
         lines = [
-            "=== DU BAO DU LICH DA NANG ===",
+            f"=== DU BAO DU LICH {self.city.city_name.upper()} ===",
             "",
         ]
 
@@ -77,7 +77,7 @@ class PipelineResult:
         return "\n".join(lines)
 
     def export(self, path: Optional[str] = None):
-        """Xuất CSV + charts."""
+        """Xuat CSV + charts."""
         base = Path(path or self.output_dir)
         base.mkdir(parents=True, exist_ok=True)
 
@@ -105,40 +105,45 @@ class PipelineResult:
         logger.info(f"Exported to {base}")
 
 
-class DanangTourismPipeline:
+class TourismPipeline:
     """
-    Pipeline chính.
+    Generic tourism forecast pipeline for any Vietnamese city.
 
     Usage:
-        pipeline = DanangTourismPipeline()
+        pipeline = TourismPipeline("hue")
         result = pipeline.run()
         print(result.summary_text())
-        result.export("output")
+        result.export("output/hue")
     """
 
     def __init__(
         self,
+        city_id: str = "danang",
         start_date: str = "2023-01-01",
         trends_horizon: int = 12,  # 12 weeks
         visitor_horizon: int = 6,  # 6 months
-        output_dir: str = "output",
+        output_dir: str = "",
         fetch_trends: bool = True,
     ):
+        load_all_cities()
+        self.city = get_city(city_id)
         self.start_date = start_date
         self.trends_horizon = trends_horizon
         self.visitor_horizon = visitor_horizon
-        self.output_dir = output_dir
+        self.output_dir = output_dir or f"output/{city_id}"
         self.fetch_trends = fetch_trends
         self.forecaster = TourismForecaster(max_context=512, max_horizon=128)
 
     def run(self) -> PipelineResult:
-        """Chạy toàn bộ pipeline."""
+        """Chay toan bo pipeline."""
+        city = self.city
 
         # 1. Collect data
         logger.info("=" * 60)
-        logger.info("STEP 1: Thu thap du lieu")
+        logger.info(f"STEP 1: Thu thap du lieu — {city.city_name}")
         logger.info("=" * 60)
         data = collect_all(
+            city=city,
             start_date=self.start_date,
             fetch_trends=self.fetch_trends,
         )
@@ -153,7 +158,7 @@ class DanangTourismPipeline:
         trends_forecasts = {}
         if "trends_weekly" in data:
             logger.info("\n" + "=" * 60)
-            logger.info("STEP 3: Forecast Google Trends")
+            logger.info(f"STEP 3: Forecast Google Trends — {city.city_name}")
             logger.info("=" * 60)
 
             trends_df = data["trends_weekly"]
@@ -172,7 +177,7 @@ class DanangTourismPipeline:
 
         # 4. Forecast visitors
         logger.info("\n" + "=" * 60)
-        logger.info("STEP 4: Forecast luong khach hang thang")
+        logger.info(f"STEP 4: Forecast luong khach — {city.city_name}")
         logger.info("=" * 60)
 
         visitors = data["visitors"]
@@ -180,7 +185,7 @@ class DanangTourismPipeline:
         visitor_forecast = self.forecaster.forecast(
             visitor_series,
             horizon=self.visitor_horizon,
-            name="Khach du lich Da Nang",
+            name=f"Khach du lich {city.city_name}",
         )
         logger.info(
             f"  Last: {visitor_forecast.last_value:,.0f}K | "
@@ -204,6 +209,7 @@ class DanangTourismPipeline:
             for col, result in trends_forecasts.items():
                 plot_trends_forecast(
                     data["trends_weekly"], result, col,
+                    city_name=city.city_name,
                     events=events,
                     save_path=str(out / f"forecast_{col}.png"),
                 )
@@ -211,6 +217,7 @@ class DanangTourismPipeline:
         # Visitors chart
         plot_monthly_visitors_forecast(
             visitors, visitor_forecast,
+            city_name=city.city_name,
             save_path=str(out / "forecast_visitors.png"),
         )
 
@@ -218,11 +225,13 @@ class DanangTourismPipeline:
         plot_dashboard(
             trends_forecasts,
             visitor_forecast,
+            city_name=city.city_name,
             weather=data.get("weather"),
             save_path=str(out / "dashboard.png"),
         )
 
         result = PipelineResult(
+            city=city,
             trends_forecasts=trends_forecasts,
             visitor_forecast=visitor_forecast,
             data=data,
@@ -234,3 +243,7 @@ class DanangTourismPipeline:
         result.export()
 
         return result
+
+
+# Backward compatibility alias
+DanangTourismPipeline = TourismPipeline

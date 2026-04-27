@@ -7,3 +7,7 @@ matplotlib>=3.7
 seaborn>=0.12
 requests
 scikit-learn>=1.3
+streamlit>=1.30
+plotly>=5.18
+statsmodels>=0.14
+prophet>=1.1

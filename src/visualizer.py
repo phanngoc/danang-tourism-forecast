@@ -1,6 +1,6 @@
 """
-Visualization cho dự báo du lịch Đà Nẵng.
-Charts đẹp, publication-quality.
+Visualization cho du bao du lich Viet Nam.
+Charts dep, publication-quality. Works for any city.
 """
 
 import logging
@@ -35,29 +35,19 @@ def plot_trends_forecast(
     history: pd.DataFrame,
     forecast_result: ForecastResult,
     col: str,
+    city_name: str = "Da Nang",
     events: Optional[pd.DataFrame] = None,
     last_n: int = 180,
     save_path: Optional[str] = None,
 ) -> plt.Figure:
     """
-    Vẽ Google Trends forecast với confidence bands.
-
-    Args:
-        history: DataFrame có DatetimeIndex
-        forecast_result: Kết quả forecast
-        col: Tên cột trong history
-        events: DataFrame events (optional, để đánh dấu)
-        last_n: Hiển thị N ngày cuối
-        save_path: Đường dẫn lưu
-
-    Returns:
-        Figure
+    Ve Google Trends forecast voi confidence bands.
     """
     fig, ax = plt.subplots(figsize=(15, 7))
 
     # History
     hist = history.tail(last_n)
-    ax.plot(hist.index, hist[col], color=C_HIST, linewidth=1.5, label="Thực tế")
+    ax.plot(hist.index, hist[col], color=C_HIST, linewidth=1.5, label="Thuc te")
 
     # Forecast dates
     last_date = hist.index[-1]
@@ -97,7 +87,7 @@ def plot_trends_forecast(
     # Format
     trend_pct = forecast_result.trend_pct
     arrow = "Tang" if trend_pct > 0 else "Giam"
-    title = f"Du bao Du lich Da Nang — {forecast_result.name}"
+    title = f"Du bao Du lich {city_name} — {forecast_result.name}"
     subtitle = f"Forecast {forecast_result.horizon} buoc | Xu huong: {arrow} {abs(trend_pct):.1f}%"
     ax.set_title(f"{title}\n{subtitle}", fontweight="bold", pad=15)
     ax.set_xlabel("Ngay")
@@ -119,10 +109,11 @@ def plot_trends_forecast(
 def plot_monthly_visitors_forecast(
     visitors: pd.DataFrame,
     forecast_result: ForecastResult,
+    city_name: str = "Da Nang",
     save_path: Optional[str] = None,
 ) -> plt.Figure:
     """
-    Vẽ forecast lượng khách hàng tháng.
+    Ve forecast luong khach hang thang.
     """
     fig, ax = plt.subplots(figsize=(14, 7))
 
@@ -160,7 +151,7 @@ def plot_monthly_visitors_forecast(
     ax.set_xticks(range(0, len(all_dates), step))
     ax.set_xticklabels([all_dates[i] for i in range(0, len(all_dates), step)], rotation=45)
 
-    ax.set_title("Luong khach du lich Da Nang — Thuc te vs Du bao",
+    ax.set_title(f"Luong khach du lich {city_name} — Thuc te vs Du bao",
                  fontweight="bold", pad=15)
     ax.set_ylabel("Nghin luot khach")
     ax.legend()
@@ -178,11 +169,12 @@ def plot_monthly_visitors_forecast(
 def plot_dashboard(
     trends_results: dict[str, ForecastResult],
     visitor_result: Optional[ForecastResult] = None,
+    city_name: str = "Da Nang",
     weather: Optional[pd.DataFrame] = None,
     save_path: Optional[str] = None,
 ) -> plt.Figure:
     """
-    Dashboard tổng hợp: nhiều metrics trên 1 figure.
+    Dashboard tong hop: nhieu metrics tren 1 figure.
     """
     n_panels = len(trends_results) + (1 if visitor_result else 0) + (1 if weather is not None else 0)
     cols = min(n_panels, 2)
@@ -227,7 +219,7 @@ def plot_dashboard(
         ax.plot(recent.index, recent["temp_max"], color="red", alpha=0.7, label="Nhiet do max")
         ax2 = ax.twinx()
         ax2.bar(recent.index, recent["rain"], color="blue", alpha=0.3, label="Mua (mm)")
-        ax.set_title("Thoi tiet Da Nang (90 ngay)", fontweight="bold")
+        ax.set_title(f"Thoi tiet {city_name} (90 ngay)", fontweight="bold")
         ax.legend(loc="upper left")
         ax2.legend(loc="upper right")
         idx += 1
@@ -236,7 +228,7 @@ def plot_dashboard(
     for j in range(idx, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle("DASHBOARD DU BAO DU LICH DA NANG",
+    fig.suptitle(f"DASHBOARD DU BAO DU LICH {city_name.upper()}",
                  fontsize=18, fontweight="bold", y=1.02)
     plt.tight_layout()
 
